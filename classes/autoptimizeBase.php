@@ -4,34 +4,34 @@ if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
 abstract class autoptimizeBase {
     protected $content = '';
     protected $tagWarning = false;
-    
+
     public function __construct($content) {
         $this->content = $content;
     }
-    
+
     //Reads the page and collects tags
     abstract public function read($justhead);
-    
+
     //Joins and optimizes collected things
     abstract public function minify();
-    
+
     //Caches the things
     abstract public function cache();
-    
+
     //Returns the content
     abstract public function getcontent();
-    
+
     //Converts an URL to a full path
     protected function getpath($url) {
         $url=apply_filters( 'autoptimize_filter_cssjs_alter_url', $url);
-        
+
         if (strpos($url,'%')!==false) {
             $url=urldecode($url);
         }
 
         $siteHost=parse_url(AUTOPTIMIZE_WP_SITE_URL,PHP_URL_HOST);
         $contentHost=parse_url(AUTOPTIMIZE_WP_ROOT_URL,PHP_URL_HOST);
-        
+
         // normalize
         if (strpos($url,'//')===0) {
             if (is_ssl()) {
@@ -47,7 +47,7 @@ abstract class autoptimizeBase {
                 $url = AUTOPTIMIZE_WP_SITE_URL.str_repeat("/..",$subdir_levels).$url;
             }
         }
-        
+
         if ($siteHost !== $contentHost) {
             $url=str_replace(AUTOPTIMIZE_WP_CONTENT_URL,AUTOPTIMIZE_WP_SITE_URL.AUTOPTIMIZE_WP_CONTENT_NAME,$url);
         }
@@ -55,25 +55,25 @@ abstract class autoptimizeBase {
         // first check; hostname wp site should be hostname of url
         $thisHost=@parse_url($url,PHP_URL_HOST);
         if ($thisHost !== $siteHost) {
-            /* 
+            /*
             * first try to get all domains from WPML (if available)
             * then explicitely declare $this->cdn_url as OK as well
             * then apply own filter autoptimize_filter_cssjs_multidomain takes an array of hostnames
             * each item in that array will be considered part of the same WP multisite installation
             */
             $multidomains = array();
-            
+
             $multidomainsWPML = apply_filters('wpml_setting', array(), 'language_domains');
             if (!empty($multidomainsWPML)) {
                 $multidomains = array_map(array($this,"ao_getDomain"),$multidomainsWPML);
             }
-            
+
             if (!empty($this->cdn_url)) {
                 $multidomains[]=parse_url($this->cdn_url,PHP_URL_HOST);
             }
-            
+
             $multidomains = apply_filters('autoptimize_filter_cssjs_multidomain', $multidomains);
-            
+
             if (!empty($multidomains)) {
                 if (in_array($thisHost,$multidomains)) {
                     $url=str_replace($thisHost, parse_url(AUTOPTIMIZE_WP_SITE_URL,PHP_URL_HOST), $url);
@@ -84,16 +84,16 @@ abstract class autoptimizeBase {
                 return false;
             }
         }
-        
+
         // try to remove "wp root url" from url while not minding http<>https
         $tmp_ao_root = preg_replace('/https?:/','',AUTOPTIMIZE_WP_ROOT_URL);
         if ($siteHost !== $contentHost) {
-            // as we replaced the content-domain with the site-domain, we should match against that 
+            // as we replaced the content-domain with the site-domain, we should match against that
             $tmp_ao_root = preg_replace('/https?:/','',AUTOPTIMIZE_WP_SITE_URL);
         }
         $tmp_url = preg_replace('/https?:/','',$url);
         $path = str_replace($tmp_ao_root,'',$tmp_url);
-        
+
         // if path starts with :// or //, this is not a URL in the WP context and we have to assume we can't aggregate
         if (preg_match('#^:?//#',$path)) {
             /** External script/css (adsense, etc) */
@@ -102,7 +102,7 @@ abstract class autoptimizeBase {
 
         // prepend with WP_ROOT_DIR to have full path to file
         $path = str_replace('//','/',WP_ROOT_DIR.$path);
-        
+
         // final check: does file exist and is it readable
         if (file_exists($path) && is_file($path) && is_readable($path)) {
             return $path;
@@ -117,13 +117,13 @@ abstract class autoptimizeBase {
         if ((strpos($in,"http")!==0) && (strpos($in,"//")!==0)) {
             $in="http://".$in;
         }
-        
+
         // do the actual parse_url
         $out = parse_url($in,PHP_URL_HOST);
-        
+
         // fallback if parse_url does not understand the url is in fact a url
         if (empty($out)) $out=$in;
-        
+
         return $out;
     }
 
@@ -140,13 +140,12 @@ abstract class autoptimizeBase {
 
     // hide everything between noptimize-comment tags
     protected function hide_noptimize($noptimize_in) {
-        if ( preg_match( '/<!--\s?noptimize\s?-->/', $noptimize_in ) ) { 
+        if ( preg_match( '/<!--\s?noptimize\s?-->/', $noptimize_in ) ) {
             $noptimize_out = preg_replace_callback(
                 '#<!--\s?noptimize\s?-->.*?<!--\s?/\s?noptimize\s?-->#is',
-                create_function(
-                    '$matches',
-                    'return "%%NOPTIMIZE".AUTOPTIMIZE_HASH."%%".base64_encode($matches[0])."%%NOPTIMIZE%%";'
-                ),
+                function($matches) {
+                    return "%%NOPTIMIZE".AUTOPTIMIZE_HASH."%%".base64_encode($matches[0])."%%NOPTIMIZE%%";
+                },
                 $noptimize_in
             );
         } else {
@@ -154,16 +153,15 @@ abstract class autoptimizeBase {
         }
         return $noptimize_out;
     }
-    
+
     // unhide noptimize-tags
     protected function restore_noptimize($noptimize_in) {
-        if ( strpos( $noptimize_in, '%%NOPTIMIZE%%' ) !== false ) { 
+        if ( strpos( $noptimize_in, '%%NOPTIMIZE%%' ) !== false ) {
             $noptimize_out = preg_replace_callback(
                 '#%%NOPTIMIZE'.AUTOPTIMIZE_HASH.'%%(.*?)%%NOPTIMIZE%%#is',
-                create_function(
-                    '$matches',
-                    'return base64_decode($matches[1]);'
-                ),
+                function($matches) {
+                    return base64_decode($matches[1]);
+                },
                 $noptimize_in
             );
         } else {
@@ -173,13 +171,12 @@ abstract class autoptimizeBase {
     }
 
     protected function hide_iehacks($iehacks_in) {
-        if ( strpos( $iehacks_in, '<!--[if' ) !== false ) { 
+        if ( strpos( $iehacks_in, '<!--[if' ) !== false ) {
             $iehacks_out = preg_replace_callback(
                 '#<!--\[if.*?\[endif\]-->#is',
-                create_function(
-                    '$matches',
-                    'return "%%IEHACK".AUTOPTIMIZE_HASH."%%".base64_encode($matches[0])."%%IEHACK%%";'
-                ),
+                function($matches) {
+                    return "%%IEHACK".AUTOPTIMIZE_HASH."%%".base64_encode($matches[0])."%%IEHACK%%";
+                },
                 $iehacks_in
             );
         } else {
@@ -189,13 +186,12 @@ abstract class autoptimizeBase {
     }
 
     protected function restore_iehacks($iehacks_in) {
-        if ( strpos( $iehacks_in, '%%IEHACK%%' ) !== false ) { 
+        if ( strpos( $iehacks_in, '%%IEHACK%%' ) !== false ) {
             $iehacks_out = preg_replace_callback(
                 '#%%IEHACK'.AUTOPTIMIZE_HASH.'%%(.*?)%%IEHACK%%#is',
-                create_function(
-                    '$matches',
-                    'return base64_decode($matches[1]);'
-                ),
+	            function($matches) {
+                    return base64_decode($matches[1]);
+                },
                 $iehacks_in
             );
         } else {
@@ -208,10 +204,9 @@ abstract class autoptimizeBase {
         if ( strpos( $comments_in, '<!--' ) !== false ) {
             $comments_out = preg_replace_callback(
                 '#<!--.*?-->#is',
-                create_function(
-                    '$matches',
-                    'return "%%COMMENTS".AUTOPTIMIZE_HASH."%%".base64_encode($matches[0])."%%COMMENTS%%";'
-                ),
+                function($matches) {
+                    return "%%COMMENTS".AUTOPTIMIZE_HASH."%%".base64_encode($matches[0])."%%COMMENTS%%";
+                },
                 $comments_in
             );
         } else {
@@ -224,10 +219,9 @@ abstract class autoptimizeBase {
         if ( strpos( $comments_in, '%%COMMENTS%%' ) !== false ) {
             $comments_out = preg_replace_callback(
                 '#%%COMMENTS'.AUTOPTIMIZE_HASH.'%%(.*?)%%COMMENTS%%#is',
-                create_function(
-                    '$matches',
-                    'return base64_decode($matches[1]);'
-                ),
+	            function($matches) {
+		            return base64_decode( $matches[1] );
+	            },
                 $comments_in
             );
         } else {
@@ -285,7 +279,7 @@ abstract class autoptimizeBase {
             }
         }
     }
-    
+
     protected function isremovable($tag, $removables) {
         foreach ($removables as $match) {
             if (strpos($tag,$match)!==false) {
@@ -294,17 +288,16 @@ abstract class autoptimizeBase {
         }
         return false;
     }
-    
+
     // inject already minified code in optimized JS/CSS
     protected function inject_minified($in) {
         if ( strpos( $in, '%%INJECTLATER%%' ) !== false ) {
             $out = preg_replace_callback(
                 '#\/\*\!%%INJECTLATER'.AUTOPTIMIZE_HASH.'%%(.*?)%%INJECTLATER%%\*\/#is',
-                create_function(
-                    '$matches',
-                    '$filepath=base64_decode(strtok($matches[1],"|"));
+                function($matches){
+                    $filepath=base64_decode(strtok($matches[1],"|"));
                     $filecontent=file_get_contents($filepath);
-                    
+
                     // remove BOM
                     $filecontent = preg_replace("#\x{EF}\x{BB}\x{BF}#","",$filecontent);
 
@@ -331,9 +324,9 @@ abstract class autoptimizeBase {
                         $filecontent="";
                     }
 
-                    // return 
-                    return "\n".$filecontent;'
-                ),
+                    // return
+                    return "\n".$filecontent;
+                },
                 $in
             );
         } else {
@@ -341,7 +334,7 @@ abstract class autoptimizeBase {
         }
         return $out;
     }
-    
+
     protected function minify_single($pathIn) {
 		// determine JS or CSS and set var (also mimetype), return false if neither
 		if ( $this->str_ends_in($pathIn,".js") === true ) {
@@ -349,20 +342,20 @@ abstract class autoptimizeBase {
 			$codeMime="text/javascript";
 		} else if ( $this->str_ends_in($pathIn,".css") === true ) {
 			$codeType="css";
-			$codeMime="text/css";			
+			$codeMime="text/css";
 		} else {
 			return false;
 		}
-		
+
 		// if min.js or min.css return false
 		if (( $this->str_ends_in($pathIn,"-min.".$codeType) === true ) || ( $this->str_ends_in($pathIn,".min.".$codeType) === true ) || ( $this->str_ends_in($pathIn,"js/jquery/jquery.js") === true ) ) {
 			return false;
 		}
-		
+
 		// read file, return false if empty
 		$_toMinify = file_get_contents($pathIn);
 		if ( empty($_toMinify) ) return false;
-		
+
 		// check cache
 		$_md5hash = "single_".md5($_toMinify);
 		$_cache = new autoptimizeCache($_md5hash,$codeType);
@@ -378,8 +371,6 @@ abstract class autoptimizeBase {
 					}
 				}
 			} else if ($codeType === "css") {
-                // make sure paths to background images/ imported css/ fonts .. are OK
-                $_toMinify = autoptimizeStyles::fixurls($pathIn,$_toMinify);
                 if (class_exists('Minify_CSS_Compressor')) {
 					$tmp_code = trim(Minify_CSS_Compressor::process($_toMinify));
                 } else if(class_exists('CSSmin')) {
@@ -400,13 +391,13 @@ abstract class autoptimizeBase {
 			$_CachedMinifiedUrl = AUTOPTIMIZE_CACHE_URL.$_cache->getname();
 		}
 		unset($_cache);
-	
+
 		// if CDN, then CDN
-		$_CachedMinifiedUrl = $this->url_replace_cdn($_CachedMinifiedUrl);									
+		$_CachedMinifiedUrl = $this->url_replace_cdn($_CachedMinifiedUrl);
 
 		return $_CachedMinifiedUrl;
 	}
-	
+
 	protected function str_ends_in($haystack,$needle) {
 		$needleLength = strlen($needle);
 		$haystackLength = strlen($haystack);
